@@ -19,7 +19,7 @@
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
       <div class="flex items-center justify-between h-20">
         <div class="flex items-center gap-4">
-          <img src="Logo-sw69.png" alt="Logo" class="h-12 w-12 rounded-full bg-white p-1">
+          <img src="https://img2.pic.in.th/Logo-sw6944b6d81ee7918a02.png" alt="Logo" class="h-12 w-12 rounded-full bg-white p-1">
           <div>
             <h1 class="text-xl font-bold">ระบบบันทึกผู้ใช้บริการสงเคราะห์ (อนุเคราะห์/ค้างชำระค่ารักษา)</h1>
             <p class="text-sm text-teal-100">กลุ่มงานสังคมสงเคราะห์ โรงพยาบาลสมเด็จพระสังฆราช (อมฺพรมหาเถร)</p>
@@ -121,7 +121,16 @@
         </div>
 
         <div class="bg-gray-50 p-4 rounded-md border border-gray-200">
-           <label class="block text-sm font-bold text-gray-700 mb-3">ที่อยู่ปัจจุบัน</label>
+           <div class="flex items-center justify-between mb-3">
+             <label class="block text-sm font-bold text-gray-700">ที่อยู่ปัจจุบัน</label>
+             <button type="button" onclick="reloadAddressData()" id="btnReloadAddr" class="text-xs text-teal-600 hover:text-teal-800 underline">
+               <i class="fas fa-sync-alt mr-1"></i>โหลดข้อมูลที่อยู่ใหม่
+             </button>
+           </div>
+           <div id="addrErrorMsg" class="hidden mb-3 text-xs font-medium text-red-600 bg-red-50 border border-red-200 rounded p-2">
+             <i class="fas fa-exclamation-triangle mr-1"></i>
+             <span id="addrErrorText">ไม่สามารถโหลดข้อมูลจังหวัด/อำเภอ/ตำบลได้ กรุณากดปุ่ม "โหลดข้อมูลที่อยู่ใหม่" หรือตรวจสอบการเชื่อมต่ออินเทอร์เน็ต</span>
+           </div>
            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div>
                 <label class="text-xs">จังหวัด</label>
@@ -229,7 +238,7 @@
     // API_URL: URL ของ Google Apps Script Web App (ลงท้ายด้วย /exec)
     // ได้จาก Deploy > New deployment > Web app หลัง deploy Code.gs เวอร์ชัน API
     // ==========================================================================
-    const API_URL = "https://script.google.com/macros/s/AKfycbwsI_1502NZihQnQ_c27ngyqThk0S2jbnX4rKUCnHTimjsyulZ5et2lmqp0E2IGVGFg/exec"; // TODO: แก้เป็น URL จริง
+    const API_URL = "https://script.google.com/macros/s/YOUR_DEPLOYMENT_ID/exec"; // TODO: แก้เป็น URL จริง
 
     // เรียกข้อมูล (อ่าน) ด้วย GET - ไม่ trigger CORS preflight
     async function apiGet(action, params) {
@@ -264,21 +273,37 @@
     const ADDR_CACHE_KEY = 'thAddressCacheV1';
     const ADDR_CACHE_TTL = 30 * 24 * 60 * 60 * 1000; // 30 วัน
 
+    // ตรวจสอบว่าข้อมูลที่อยู่ (province/district/sub_district) เป็น array ที่ไม่ว่าง
+    // และแต่ละรายการมีรูปแบบ {id, name_th} ที่ใช้งานได้จริง ไม่ใช่แค่ truthy เฉยๆ
+    // (array เปล่า [] ก็ truthy แต่ใช้งานไม่ได้ - เป็นสาเหตุหนึ่งที่ cache เสียแล้วไม่ถูกเลิกใช้)
+    function isValidAddressList(arr) {
+      return Array.isArray(arr) && arr.length > 0 &&
+        typeof arr[0].id !== 'undefined' && typeof arr[0].name_th === 'string' && arr[0].name_th !== '';
+    }
+
     function loadAddressCache() {
       try {
         const raw = localStorage.getItem(ADDR_CACHE_KEY);
         if (!raw) return null;
         const parsed = JSON.parse(raw);
         if (!parsed.savedAt || (Date.now() - parsed.savedAt) > ADDR_CACHE_TTL) return null;
-        if (!parsed.provinces || !parsed.districts || !parsed.subDistricts) return null;
+        if (!isValidAddressList(parsed.provinces) || !isValidAddressList(parsed.districts) || !isValidAddressList(parsed.subDistricts)) {
+          // cache เสีย/ว่างเปล่า - ลบทิ้งเลยกันค้างใช้ซ้ำไปเรื่อยๆ
+          clearAddressCache();
+          return null;
+        }
         return parsed;
-      } catch (e) { return null; }
+      } catch (e) { clearAddressCache(); return null; }
     }
 
     function saveAddressCache(obj) {
       try {
         localStorage.setItem(ADDR_CACHE_KEY, JSON.stringify(Object.assign({ savedAt: Date.now() }, obj)));
       } catch (e) { /* localStorage อาจเต็มหรือถูกปิดใช้งาน - ข้ามไปเงียบๆ */ }
+    }
+
+    function clearAddressCache() {
+      try { localStorage.removeItem(ADDR_CACHE_KEY); } catch (e) {}
     }
 
     // --- On Load ---
@@ -396,30 +421,70 @@
     }
 
     // --- Address Logic ---
-    async function fetchAddressData() {
+    function showAddrError(show, text) {
+      const box = document.getElementById('addrErrorMsg');
+      if (!box) return;
+      if (show) {
+        if (text) document.getElementById('addrErrorText').innerText = text;
+        box.classList.remove('hidden');
+      } else {
+        box.classList.add('hidden');
+      }
+    }
+
+    async function fetchAddressData(forceReload) {
+      showAddrError(false);
       try {
-        const cached = loadAddressCache();
-        if (cached) {
-          provinces = cached.provinces;
-          districts = cached.districts;
-          subDistricts = cached.subDistricts;
-          setupAddressDropdowns();
-          return;
+        if (!forceReload) {
+          const cached = loadAddressCache();
+          if (cached) {
+            provinces = cached.provinces;
+            districts = cached.districts;
+            subDistricts = cached.subDistricts;
+            setupAddressDropdowns();
+            return;
+          }
+        } else {
+          clearAddressCache();
         }
 
         const [pRes, dRes, sRes] = await Promise.all([
            fetch(API_PROVINCE), fetch(API_DISTRICT), fetch(API_SUBDISTRICT)
         ]);
-        provinces = await pRes.json();
-        districts = await dRes.json();
-        subDistricts = await sRes.json();
+        if (!pRes.ok || !dRes.ok || !sRes.ok) {
+          throw new Error('โหลดข้อมูลไม่สำเร็จ (HTTP ' + [pRes.status, dRes.status, sRes.status].join('/') + ')');
+        }
+
+        const [pData, dData, sData] = await Promise.all([pRes.json(), dRes.json(), sRes.json()]);
+
+        // ตรวจสอบรูปแบบข้อมูลก่อนใช้งาน/cache - กัน cache ข้อมูลเสียซ้ำแบบที่เกิดขึ้นมาก่อน
+        if (!isValidAddressList(pData) || !isValidAddressList(dData) || !isValidAddressList(sData)) {
+          throw new Error('รูปแบบข้อมูลที่อยู่ที่ได้รับไม่ถูกต้อง');
+        }
+
+        provinces = pData;
+        districts = dData;
+        subDistricts = sData;
 
         saveAddressCache({ provinces, districts, subDistricts });
         setupAddressDropdowns();
       } catch (err) {
         console.error("Error loading address", err);
-        Swal.fire("Error", "ไม่สามารถโหลดข้อมูลที่อยู่ได้", "error");
+        clearAddressCache(); // อย่าปล่อยให้ cache เสียค้างอยู่
+        showAddrError(true, 'ไม่สามารถโหลดข้อมูลจังหวัด/อำเภอ/ตำบลได้ (' + err.message + ') กรุณากดปุ่ม "โหลดข้อมูลที่อยู่ใหม่" หรือตรวจสอบการเชื่อมต่ออินเทอร์เน็ต');
       }
+    }
+
+    async function reloadAddressData() {
+      const btn = document.getElementById('btnReloadAddr');
+      const originalHtml = btn.innerHTML;
+      btn.disabled = true;
+      btn.innerHTML = '<i class="fas fa-circle-notch fa-spin mr-1"></i>กำลังโหลด...';
+
+      await fetchAddressData(true);
+
+      btn.disabled = false;
+      btn.innerHTML = originalHtml;
     }
 
     function setupAddressDropdowns() {
