@@ -129,7 +129,7 @@
            </div>
            <div id="addrErrorMsg" class="hidden mb-3 text-xs font-medium text-red-600 bg-red-50 border border-red-200 rounded p-2">
              <i class="fas fa-exclamation-triangle mr-1"></i>
-             <span id="addrErrorText">ไม่สามารถโหลดข้อมูลจังหวัด/อำเภอ/ตำบลได้ กรุณากดปุ่ม "โหลดข้อมูลที่อยู่ใหม่" หรือตรวจสอบการเชื่อมต่ออินเทอร์เน็ต</span>
+             <span id="addrErrorText">ไม่สามารถโหลดข้อมูลจังหวัด/อำเภอ/ตำบลได้ กรุณากดปุ่ม "โหลดข้อมูลที่อยู่ใหม่" หรือตรวจสอบว่าอัปโหลดโฟลเดอร์ data/ (province.json, district.json, sub_district.json) ไว้ที่เดียวกับไฟล์นี้แล้ว</span>
            </div>
            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div>
@@ -263,15 +263,38 @@
     }
 
     // --- Data URL ---
-    const API_PROVINCE = "https://raw.githubusercontent.com/kongvut/thai-province-data/master/api/latest/province.json";
-    const API_DISTRICT = "https://raw.githubusercontent.com/kongvut/thai-province-data/master/api/latest/district.json";
-    const API_SUBDISTRICT = "https://raw.githubusercontent.com/kongvut/thai-province-data/master/api/latest/sub_district.json";
+    // เก็บไฟล์ข้อมูลจังหวัด/อำเภอ/ตำบลไว้ในโฟลเดอร์ data/ ของเว็บเอง (ไม่พึ่งพาแหล่งข้อมูลภายนอกอีกต่อไป)
+    // เหตุผล: แหล่งเดิม (raw.githubusercontent.com/kongvut/thai-province-data) เคยเปลี่ยนรูปแบบ JSON
+    // จาก field แบน name_th เป็น object name:{th:...,en:...} โดยไม่แจ้งล่วงหน้า ทำให้หน้านี้โหลดที่อยู่ไม่ขึ้น
+    // การ host ไฟล์เองทำให้ข้อมูลไม่เปลี่ยนแปลงโดยไม่รู้ตัว และโหลดเร็วขึ้นเพราะไม่ต้องพึ่ง CDN ภายนอก
+    const API_PROVINCE = "data/province.json";
+    const API_DISTRICT = "data/district.json";
+    const API_SUBDISTRICT = "data/sub_district.json";
 
     let provinces = [], districts = [], subDistricts = [];
 
     // --- Cache ข้อมูลที่อยู่ไว้ใน localStorage กันโหลดไฟล์ใหญ่ซ้ำทุกครั้งที่เปิดหน้า ---
     const ADDR_CACHE_KEY = 'thAddressCacheV1';
     const ADDR_CACHE_TTL = 30 * 24 * 60 * 60 * 1000; // 30 วัน
+
+    // ป้องกันปัญหากรณีไฟล์ข้อมูลที่อยู่ (province/district/sub_district) ถูกแทนที่ด้วยไฟล์รูปแบบใหม่
+    // ในอนาคตโดยไม่ได้ตั้งใจ (เช่น ไปดึงจากแหล่งภายนอกที่เปลี่ยน schema เป็น name:{th,en} อีกครั้ง)
+    // ฟังก์ชันนี้แปลงให้เป็น field แบน name_th/name_en เสมอ ไม่ว่าไฟล์จะมาในรูปแบบใด
+    function normalizeThaiNames(arr) {
+      if (!Array.isArray(arr)) return arr;
+      return arr.map(item => {
+        if (typeof item.name_th === 'string' && item.name_th !== '') return item; // รูปแบบแบนอยู่แล้ว ใช้ได้เลย
+        if (item.name && typeof item.name === 'object') {
+          const prefixTh = (item.prefix && item.prefix.th) || '';
+          const prefixEn = (item.prefix && item.prefix.en) ? (item.prefix.en + ' ') : '';
+          return Object.assign({}, item, {
+            name_th: prefixTh + (item.name.th || ''),
+            name_en: (prefixEn + (item.name.en || '')).trim()
+          });
+        }
+        return item;
+      });
+    }
 
     // ตรวจสอบว่าข้อมูลที่อยู่ (province/district/sub_district) เป็น array ที่ไม่ว่าง
     // และแต่ละรายการมีรูปแบบ {id, name_th} ที่ใช้งานได้จริง ไม่ใช่แค่ truthy เฉยๆ
@@ -455,7 +478,12 @@
           throw new Error('โหลดข้อมูลไม่สำเร็จ (HTTP ' + [pRes.status, dRes.status, sRes.status].join('/') + ')');
         }
 
-        const [pData, dData, sData] = await Promise.all([pRes.json(), dRes.json(), sRes.json()]);
+        let [pData, dData, sData] = await Promise.all([pRes.json(), dRes.json(), sRes.json()]);
+
+        // แปลงให้เป็น field แบน name_th/name_en เสมอ เผื่อไฟล์ข้อมูลมาในรูปแบบ name:{th,en}
+        pData = normalizeThaiNames(pData);
+        dData = normalizeThaiNames(dData);
+        sData = normalizeThaiNames(sData);
 
         // ตรวจสอบรูปแบบข้อมูลก่อนใช้งาน/cache - กัน cache ข้อมูลเสียซ้ำแบบที่เกิดขึ้นมาก่อน
         if (!isValidAddressList(pData) || !isValidAddressList(dData) || !isValidAddressList(sData)) {
@@ -471,7 +499,7 @@
       } catch (err) {
         console.error("Error loading address", err);
         clearAddressCache(); // อย่าปล่อยให้ cache เสียค้างอยู่
-        showAddrError(true, 'ไม่สามารถโหลดข้อมูลจังหวัด/อำเภอ/ตำบลได้ (' + err.message + ') กรุณากดปุ่ม "โหลดข้อมูลที่อยู่ใหม่" หรือตรวจสอบการเชื่อมต่ออินเทอร์เน็ต');
+        showAddrError(true, 'ไม่สามารถโหลดข้อมูลจังหวัด/อำเภอ/ตำบลได้ (' + err.message + ') กรุณากดปุ่ม "โหลดข้อมูลที่อยู่ใหม่" หรือตรวจสอบว่าอัปโหลดโฟลเดอร์ data/ (province.json, district.json, sub_district.json) ไว้ที่เดียวกับไฟล์นี้แล้ว');
       }
     }
 
