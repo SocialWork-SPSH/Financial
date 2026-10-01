@@ -280,16 +280,15 @@
     // ป้องกันปัญหากรณีไฟล์ข้อมูลที่อยู่ (province/district/sub_district) ถูกแทนที่ด้วยไฟล์รูปแบบใหม่
     // ในอนาคตโดยไม่ได้ตั้งใจ (เช่น ไปดึงจากแหล่งภายนอกที่เปลี่ยน schema เป็น name:{th,en} อีกครั้ง)
     // ฟังก์ชันนี้แปลงให้เป็น field แบน name_th/name_en เสมอ ไม่ว่าไฟล์จะมาในรูปแบบใด
+    // หมายเหตุ: ไม่เติมคำนำหน้า "อำเภอ/เขต" "ตำบล/แขวง" ให้ตั้งใจ - แสดงเฉพาะชื่อเฉยๆ ตามที่ต้องการ
     function normalizeThaiNames(arr) {
       if (!Array.isArray(arr)) return arr;
       return arr.map(item => {
         if (typeof item.name_th === 'string' && item.name_th !== '') return item; // รูปแบบแบนอยู่แล้ว ใช้ได้เลย
         if (item.name && typeof item.name === 'object') {
-          const prefixTh = (item.prefix && item.prefix.th) || '';
-          const prefixEn = (item.prefix && item.prefix.en) ? (item.prefix.en + ' ') : '';
           return Object.assign({}, item, {
-            name_th: prefixTh + (item.name.th || ''),
-            name_en: (prefixEn + (item.name.en || '')).trim()
+            name_th: item.name.th || '',
+            name_en: item.name.en || ''
           });
         }
         return item;
