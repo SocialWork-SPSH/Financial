@@ -267,9 +267,9 @@
     // เหตุผล: แหล่งเดิม (raw.githubusercontent.com/kongvut/thai-province-data) เคยเปลี่ยนรูปแบบ JSON
     // จาก field แบน name_th เป็น object name:{th:...,en:...} โดยไม่แจ้งล่วงหน้า ทำให้หน้านี้โหลดที่อยู่ไม่ขึ้น
     // การ host ไฟล์เองทำให้ข้อมูลไม่เปลี่ยนแปลงโดยไม่รู้ตัว และโหลดเร็วขึ้นเพราะไม่ต้องพึ่ง CDN ภายนอก
-    const API_PROVINCE = "data/province.json";
-    const API_DISTRICT = "data/district.json";
-    const API_SUBDISTRICT = "data/sub_district.json";
+    const API_PROVINCE = "province.json";
+    const API_DISTRICT = "district.json";
+    const API_SUBDISTRICT = "sub_district.json";
 
     let provinces = [], districts = [], subDistricts = [];
 
